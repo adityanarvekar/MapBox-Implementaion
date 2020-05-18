@@ -1,0 +1,15 @@
+<resources>
+    <string name="app_name">Veoride Coding</string>
+    <string name="access_token" translatable="false">pk.eyJ1IjoiYWRpdHlhLW1hcGJveCIsImEiOiJja2FiYnV2bGkwY3hpMnhxbDc2NHE4cXA3In0.AZhM4ZqGb94w6z9vtMXYrA</string>
+    <string name="user_location_permission_explanation">This app needs location permissions to show its functionality.</string>
+    <string name="user_location_permission_not_granted">You didn\'t grant location permissions.</string>
+    <string name="unit_type_key" translatable="false">unit_type</string>
+    <string name="error_valid_route_not_found">Valid route not found.</string>
+    <string name="error_route_not_available">Current route is not available</string>
+    <string name="route_profile_key" translatable="false">route_profile</string>
+    <string name="language_key" translatable="false">language</string>
+    <string name="default_locale" translatable="false">default_for_device</string>
+    <string name="default_unit_type" translatable="false">default_for_device</string>
+    <string name="error_select_longer_route">Please select a longer route</string>
+    <string name="explanation_long_press_waypoint">Long press map to place waypoint</string>
+</resources>
