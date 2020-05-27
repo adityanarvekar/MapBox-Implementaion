@@ -1,106 +1,299 @@
 package com.test.veoridecoding;
 
+
+import android.annotation.SuppressLint;
 import android.app.AlertDialog;
 import android.content.DialogInterface;
-import android.content.SharedPreferences;
+import android.graphics.BitmapFactory;
+import android.graphics.Color;
+import android.location.Address;
+import android.location.Geocoder;
 import android.location.Location;
+import android.os.Build;
 import android.os.Bundle;
-import android.preference.PreferenceManager;
 import android.support.annotation.NonNull;
-import android.support.design.widget.Snackbar;
 import android.support.v7.app.AppCompatActivity;
+import android.support.v7.widget.Toolbar;
 import android.util.Log;
 import android.view.View;
+import android.view.Window;
+import android.view.WindowManager;
 import android.widget.Button;
-import android.widget.ProgressBar;
 import android.widget.Toast;
 
-import com.mapbox.android.core.location.LocationEngine;
-import com.mapbox.android.core.location.LocationEngineCallback;
-import com.mapbox.android.core.location.LocationEngineProvider;
-import com.mapbox.android.core.location.LocationEngineRequest;
-import com.mapbox.android.core.location.LocationEngineResult;
-import com.mapbox.api.directions.v5.DirectionsCriteria;
+import com.mapbox.android.core.permissions.PermissionsListener;
+import com.mapbox.android.core.permissions.PermissionsManager;
 import com.mapbox.api.directions.v5.models.DirectionsResponse;
 import com.mapbox.api.directions.v5.models.DirectionsRoute;
-import com.mapbox.core.constants.Constants;
-import com.mapbox.geojson.LineString;
+import com.mapbox.geojson.Feature;
 import com.mapbox.geojson.Point;
 import com.mapbox.mapboxsdk.Mapbox;
-import com.mapbox.mapboxsdk.annotations.Marker;
-import com.mapbox.mapboxsdk.annotations.MarkerOptions;
 import com.mapbox.mapboxsdk.camera.CameraPosition;
-import com.mapbox.mapboxsdk.camera.CameraUpdateFactory;
-import com.mapbox.mapboxsdk.exceptions.InvalidLatLngBoundsException;
 import com.mapbox.mapboxsdk.geometry.LatLng;
-import com.mapbox.mapboxsdk.geometry.LatLngBounds;
 import com.mapbox.mapboxsdk.location.LocationComponent;
-import com.mapbox.mapboxsdk.location.modes.RenderMode;
+import com.mapbox.mapboxsdk.location.modes.CameraMode;
 import com.mapbox.mapboxsdk.maps.MapView;
 import com.mapbox.mapboxsdk.maps.MapboxMap;
 import com.mapbox.mapboxsdk.maps.OnMapReadyCallback;
 import com.mapbox.mapboxsdk.maps.Style;
+import com.mapbox.mapboxsdk.style.layers.SymbolLayer;
+import com.mapbox.mapboxsdk.style.sources.GeoJsonSource;
 import com.mapbox.services.android.navigation.ui.v5.NavigationLauncher;
 import com.mapbox.services.android.navigation.ui.v5.NavigationLauncherOptions;
 import com.mapbox.services.android.navigation.ui.v5.route.NavigationMapRoute;
-import com.mapbox.services.android.navigation.ui.v5.route.OnRouteSelectionChangeListener;
+import com.mapbox.services.android.navigation.v5.location.replay.ReplayRouteLocationEngine;
+import com.mapbox.services.android.navigation.v5.navigation.MapboxNavigation;
+import com.mapbox.services.android.navigation.v5.navigation.MapboxNavigationOptions;
 import com.mapbox.services.android.navigation.v5.navigation.NavigationRoute;
-import com.mapbox.services.android.navigation.v5.utils.LocaleUtils;
+import com.mapbox.services.android.navigation.v5.routeprogress.ProgressChangeListener;
+import com.mapbox.services.android.navigation.v5.routeprogress.RouteProgress;
 
-import java.lang.ref.WeakReference;
+import org.jetbrains.annotations.NotNull;
+
+import java.io.IOException;
 import java.text.NumberFormat;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 
-import butterknife.BindView;
-import butterknife.ButterKnife;
-import butterknife.OnClick;
 import retrofit2.Call;
+import retrofit2.Callback;
 import retrofit2.Response;
-import timber.log.Timber;
 
-public class MainActivity extends AppCompatActivity implements OnMapReadyCallback,
-        MapboxMap.OnMapClickListener, OnRouteSelectionChangeListener {
+import static com.mapbox.mapboxsdk.style.layers.PropertyFactory.iconAllowOverlap;
+import static com.mapbox.mapboxsdk.style.layers.PropertyFactory.iconIgnorePlacement;
+import static com.mapbox.mapboxsdk.style.layers.PropertyFactory.iconImage;
 
-    private static final int CAMERA_ANIMATION_DURATION = 1000;
-    private static final long UPDATE_INTERVAL_IN_MILLISECONDS = 1000;
-    private static final long FASTEST_UPDATE_INTERVAL_IN_MILLISECONDS = 500;
-
-    private final NavigationLauncherLocationCallback callback = new NavigationLauncherLocationCallback(MainActivity.this);
-    private LocationEngine locationEngine;
-    private NavigationMapRoute mapRoute;
-    private MapboxMap mapboxMap;
-    private Marker currentMarker;
-    private Point currentLocation;
-    private static Point source;
-    private static Point destination;
-    private DirectionsRoute route;
-    private LocaleUtils localeUtils;
-    private boolean locationFound;
-    long startTime=0;
-    NumberFormat formatter = NumberFormat.getNumberInstance();
-
-
-    @BindView(R.id.mapView)
+public class MainActivity extends AppCompatActivity implements OnMapReadyCallback, MapboxMap.OnMapClickListener, PermissionsListener, ProgressChangeListener {
+    Toolbar toolbar;
+    Button startnavigation;
     MapView mapView;
-    @BindView(R.id.launch_route_btn)
-    Button launchRouteBtn;
-    @BindView(R.id.loading)
-    ProgressBar loading;
+    MapboxMap mapboxMap;
+    // variables for adding location layer
+    PermissionsManager permissionsManager;
+    LocationComponent locationComponent;
+    // variables for calculating and drawing a route
+    DirectionsRoute currentRoute;
+    NavigationMapRoute navigationMapRoute;
+    MapboxNavigation navigation;
+    ReplayRouteLocationEngine replayEngine;
+    boolean showResults = false;
+    RouteProgress routeProgress;
+    long startTime=0;
+    Location currentLocation, sourceLocation;
+    NumberFormat formatter = NumberFormat.getNumberInstance();
+    String currentLocationName = "";
+    String sourceLocationName = "";
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        Mapbox.getInstance(MainActivity.this,getString(R.string.access_token));
+        Mapbox.getInstance(this, getString(R.string.access_token));
 
+        MapboxNavigationOptions mapboxNavigationOptions = MapboxNavigationOptions.builder()
+                .isDebugLoggingEnabled(true)
+                .build();
         formatter.setMinimumFractionDigits(2);
         formatter.setMaximumFractionDigits(2);
+        replayEngine = new ReplayRouteLocationEngine();
+        navigation = new MapboxNavigation(MainActivity.this, getString(R.string.access_token), mapboxNavigationOptions, replayEngine);
+        navigation.addProgressChangeListener(MainActivity.this);
+
         setContentView(R.layout.activity_main);
-        ButterKnife.bind(MainActivity.this);
+        mapView = findViewById(R.id.mapView);
         mapView.onCreate(savedInstanceState);
         mapView.getMapAsync(MainActivity.this);
-        localeUtils = new LocaleUtils();
+
+        //setting the status bar color
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            Window window = getWindow();
+            window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+            window.setStatusBarColor(Color.parseColor("#0A436F"));
+        }
+    }
+
+    private void setupUI() {
+        startnavigation = findViewById(R.id.startnavigationbutton);
+        toolbar = findViewById(R.id.toolbar);
+        setSupportActionBar(toolbar);
+
+        startnavigation.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startTime = System.currentTimeMillis();
+                sourceLocation = locationComponent.getLastKnownLocation();
+                sourceLocationName = getLocationStringName(sourceLocation);
+                showResults = true;
+                replayEngine.assign(currentRoute);
+                navigation.setLocationEngine(replayEngine);
+                NavigationLauncherOptions.Builder optionsBuilder = NavigationLauncherOptions.builder()
+                        .shouldSimulateRoute(true);
+                CameraPosition initialPosition = new CameraPosition.Builder()
+                        .target(new LatLng(locationComponent.getLastKnownLocation().getLatitude(), locationComponent.getLastKnownLocation().getLongitude()))
+                        .zoom(16)
+                        .build();
+                optionsBuilder.initialMapCameraPosition(initialPosition);
+                optionsBuilder.directionsRoute(currentRoute);
+                navigation.startNavigation(currentRoute);
+                NavigationLauncher.startNavigation(MainActivity.this, optionsBuilder.build());
+
+            }
+        });
+    }
+
+    private String getLocationStringName(Location metLocation) {
+        String locationname = "";
+        try {
+            Geocoder geocoder = new Geocoder(MainActivity.this, Locale.getDefault());
+            List<Address> addresses = geocoder.getFromLocation(metLocation.getLatitude(), metLocation.getLongitude(), 1);
+            if(addresses.size()>0){
+               locationname = addresses.get(0).getThoroughfare();
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        return locationname;
+
+    }
+
+
+    @SuppressWarnings( {"MissingPermission"})
+    @Override
+    public boolean onMapClick(@NonNull LatLng point) {
+
+        Point destinationPoint = Point.fromLngLat(point.getLongitude(), point.getLatitude());
+        Point originPoint = null;
+        if (locationComponent.getLastKnownLocation() != null) {
+            originPoint = Point.fromLngLat(locationComponent.getLastKnownLocation().getLongitude(),
+                    locationComponent.getLastKnownLocation().getLatitude());
+        }
+
+        GeoJsonSource source = Objects.requireNonNull(mapboxMap.getStyle()).getSourceAs("destination-source-id");
+        if (source != null) {
+            source.setGeoJson(Feature.fromGeometry(destinationPoint));
+        }
+
+        getRoute(originPoint, destinationPoint);
+        startnavigation.setEnabled(true);
+        return true;
+    }
+
+    @Override
+    public void onMapReady(@NonNull final MapboxMap mapboxMap) {
+        this.mapboxMap = mapboxMap;
+        mapboxMap.setStyle(getString(R.string.navigation_guidance_day), new Style.OnStyleLoaded() {
+            @Override
+            public void onStyleLoaded(@NonNull Style style) {
+                enableLocationComponent(style);
+
+                addDestinationIconSymbolLayer(style);
+
+                mapboxMap.addOnMapClickListener(MainActivity.this);
+                setupUI();
+            }
+        });
+    }
+
+    private void addDestinationIconSymbolLayer(@NonNull Style loadedMapStyle) {
+        loadedMapStyle.addImage("destination-icon-id",
+                BitmapFactory.decodeResource(this.getResources(), R.drawable.mapbox_marker_icon_default));
+        GeoJsonSource geoJsonSource = new GeoJsonSource("destination-source-id");
+        loadedMapStyle.addSource(geoJsonSource);
+        SymbolLayer destinationSymbolLayer = new SymbolLayer("destination-symbol-layer-id", "destination-source-id");
+        destinationSymbolLayer.withProperties(
+                iconImage("destination-icon-id"),
+                iconAllowOverlap(true),
+                iconIgnorePlacement(true)
+        );
+        loadedMapStyle.addLayer(destinationSymbolLayer);
+    }
+
+    private void getRoute(Point origin, Point destination) {
+
+        assert Mapbox.getAccessToken() != null;
+        NavigationRoute.builder(this)
+                .accessToken(Mapbox.getAccessToken())
+                .origin(origin)
+                .destination(destination)
+                .build()
+                .getRoute(new Callback<DirectionsResponse>() {
+                    @SuppressLint("LogNotTimber")
+                    @Override
+                    public void onResponse(@NotNull Call<DirectionsResponse> call, @NotNull Response<DirectionsResponse> response) {
+// You can get the generic HTTP info about the response
+                        Log.d("MainActivity", "Response code: " + response.code());
+
+                        if (response.body() == null) {
+                            Log.e("MainActivity", "No routes found, make sure you set the right user and access token.");
+                            return;
+                        } else if (response.body().routes().size() < 1) {
+                            Log.e("MainActivity", "No routes found");
+                            return;
+                        }
+
+                        currentRoute = response.body().routes().get(0);
+                        if (navigationMapRoute != null) {
+                            navigationMapRoute.removeRoute();
+                        } else {
+                            navigationMapRoute = new NavigationMapRoute(null, mapView, mapboxMap, R.style.NavigationMapRoute);
+                        }
+                        navigationMapRoute.addRoute(currentRoute);
+
+                    }
+
+                    @SuppressLint("LogNotTimber")
+                    @Override
+                    public void onFailure(@NotNull Call<DirectionsResponse> call, @NotNull Throwable throwable) {
+                        Log.e("MainActivity", "Error: " + throwable.getMessage());
+                    }
+
+
+
+                });
+
+    }
+
+
+    @SuppressWarnings( {"MissingPermission"})
+    private void enableLocationComponent(@NonNull Style loadedMapStyle) {
+// Check if permissions are enabled and if not request
+        if (PermissionsManager.areLocationPermissionsGranted(this)) {
+// Activate the MapboxMap LocationComponent to show user location
+// Adding in LocationComponentOptions is also an optional parameter
+            locationComponent = mapboxMap.getLocationComponent();
+            locationComponent.activateLocationComponent(this, loadedMapStyle);
+            locationComponent.setLocationComponentEnabled(true);
+// Set the component's camera mode
+            locationComponent.setCameraMode(CameraMode.TRACKING);
+        } else {
+            permissionsManager = new PermissionsManager(this);
+            permissionsManager.requestLocationPermissions(this);
+        }
+    }
+
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        permissionsManager.onRequestPermissionsResult(requestCode, permissions, grantResults);
+    }
+
+    @Override
+    public void onExplanationNeeded(List<String> permissionsToExplain) {
+        Toast.makeText(this, R.string.user_location_permission_explanation, Toast.LENGTH_LONG).show();
+    }
+
+
+    @Override
+    public void onPermissionResult(boolean granted) {
+        if (granted) {
+            enableLocationComponent(Objects.requireNonNull(mapboxMap.getStyle()));
+            setupUI();
+        } else {
+            Toast.makeText(this, R.string.user_location_permission_not_granted, Toast.LENGTH_LONG).show();
+            finish();
+        }
     }
 
     @Override
@@ -109,71 +302,59 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         mapView.onStart();
     }
 
-    @SuppressWarnings( {"MissingPermission"})
     @Override
-    public void onResume() {
+    protected void onResume() {
         super.onResume();
         mapView.onResume();
-        if (locationEngine != null) {
-            locationEngine.requestLocationUpdates(buildEngineRequest(), callback, null);
-            if(source!=null && destination!=null){
-
-                double s1 = source.latitude();
-                double s2 = source.longitude();
-                double d1 = destination.latitude();
-                double d2 = destination.longitude();
-
-
-                String sou = formatter.format(s1)+" "+formatter.format(s2);
-                String dest = formatter.format(d1)+" "+formatter.format(d2);
-                float result[] = new float[1];
-                Location.distanceBetween(s1,s2,d1,d2,result);
-                long endTime = System.currentTimeMillis();
-                double seconds = (float)(endTime - startTime)/1000;
-                final String secondsStr = formatter.format(seconds) +" seconds";
-                final String distance = formatter.format(result[0]/1000);
-                String summary = "Summary of Your Trip: You traveled "+distance+" miles in "+secondsStr+" from "+sou+" to "+dest;
-                AlertDialog.Builder alertDialogBuilder = new AlertDialog.Builder(this);
-                alertDialogBuilder.setMessage(summary);
-                        alertDialogBuilder.setPositiveButton("OK",
-                                new DialogInterface.OnClickListener() {
-                                    @Override
-                                    public void onClick(DialogInterface arg0, int arg1) {
-
-                                    }
-                                });
-
-
-                AlertDialog alertDialog = alertDialogBuilder.create();
-                alertDialog.show();
-
-
-            }
-
+        if(showResults){
+            navigation.stopNavigation();
+            navigation.removeProgressChangeListener(MainActivity.this);
+            showResults = false;
+            showProgress();
         }
     }
 
+    private void showProgress() {
+        Location currLoc = getLoc();
+        currentLocationName = "";
+        double distanceTravelled = routeProgress.distanceTraveled();
+        long endTime = System.currentTimeMillis();
+        double seconds = (float)(endTime - startTime)/1000;
+        final String secondsStr = formatter.format(seconds) +" seconds";
+        final String distance = formatter.format(distanceTravelled/1000);
+        currentLocationName = getLocationStringName(currLoc);
+        String summary = "Summary of Your Trip:\nYou traveled "+distance+" miles in "+secondsStr+" from "+sourceLocationName+" to "+currentLocationName;
+        AlertDialog.Builder alertDialogBuilder = new AlertDialog.Builder(this);
+        alertDialogBuilder.setMessage(summary);
+        alertDialogBuilder.setPositiveButton("OK",
+                new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface arg0, int arg1) {
+
+                    }
+                });
+
+
+        AlertDialog alertDialog = alertDialogBuilder.create();
+        alertDialog.show();
+    }
+
     @Override
-    public void onPause() {
+    protected void onPause() {
         super.onPause();
         mapView.onPause();
-        if (locationEngine != null) {
-            locationEngine.removeLocationUpdates(callback);
-        }
-    }
-
-    @Override
-    public void onLowMemory() {
-        super.onLowMemory();
-        mapView.onLowMemory();
     }
 
     @Override
     protected void onStop() {
         super.onStop();
         mapView.onStop();
-        startTime = System.currentTimeMillis();
-        Log.e("Time","Time");
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        mapView.onSaveInstanceState(outState);
     }
 
     @Override
@@ -183,247 +364,22 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     }
 
     @Override
-    protected void onSaveInstanceState(Bundle outState) {
-        super.onSaveInstanceState(outState);
-        mapView.onSaveInstanceState(outState);
-    }
-
-    @OnClick(R.id.launch_route_btn)
-    public void onRouteLaunchClick() {
-        launchNavigationWithRoute();
+    public void onLowMemory() {
+        super.onLowMemory();
+        mapView.onLowMemory();
     }
 
     @Override
-    public void onMapReady(final MapboxMap mapboxMap) {
-        this.mapboxMap = mapboxMap;
-        mapboxMap.setStyle(Style.MAPBOX_STREETS, new Style.OnStyleLoaded() {
-            @Override
-            public void onStyleLoaded(@NonNull Style style) {
-                mapboxMap.addOnMapClickListener(MainActivity.this);
-                initializeLocationEngine();
-                initializeLocationComponent(style);
-                initializeMapRoute();
-            }
-        });
+    public void onProgressChange(Location location, RouteProgress routeProgress1) {
+        currentLocation = location;
+        routeProgress = routeProgress1;
     }
 
-    @Override
-    public boolean onMapClick(@NonNull LatLng point) {
-        destination = Point.fromLngLat(point.getLongitude(), point.getLatitude());
-        launchRouteBtn.setEnabled(false);
-        loading.setVisibility(View.VISIBLE);
-        setCurrentMarkerPosition(point);
-        if (currentLocation != null) {
-            fetchRoute();
-        }
-        return false;
+    public RouteProgress getRouteProgress(){
+        return routeProgress;
     }
-
-    @Override
-    public void onNewPrimaryRouteSelected(DirectionsRoute directionsRoute) {
-        route = directionsRoute;
-    }
-
-    void updateCurrentLocation(Point currentLocation) {
-        this.currentLocation = currentLocation;
-    }
-
-    void onLocationFound(Location location) {
-        if (!locationFound) {
-            animateCamera(new LatLng(location.getLatitude(), location.getLongitude()));
-            Snackbar.make(mapView, R.string.explanation_long_press_waypoint, Snackbar.LENGTH_LONG).show();
-            locationFound = true;
-            hideLoading();
-        }
-    }
-
-
-    @SuppressWarnings( {"MissingPermission"})
-    private void initializeLocationEngine() {
-        locationEngine = LocationEngineProvider.getBestLocationEngine(getApplicationContext());
-        LocationEngineRequest request = buildEngineRequest();
-        locationEngine.requestLocationUpdates(request, callback, null);
-        locationEngine.getLastLocation(callback);
-    }
-
-    @SuppressWarnings( {"MissingPermission"})
-    private void initializeLocationComponent(Style style) {
-        LocationComponent locationComponent = mapboxMap.getLocationComponent();
-        locationComponent.activateLocationComponent(MainActivity.this, style, locationEngine);
-        locationComponent.setLocationComponentEnabled(true);
-        locationComponent.setRenderMode(RenderMode.COMPASS);
-    }
-
-    private void initializeMapRoute() {
-        mapRoute = new NavigationMapRoute(mapView, mapboxMap);
-        mapRoute.setOnRouteSelectionChangeListener(MainActivity.this);
-    }
-    private void fetchRoute() {
-        source = currentLocation;
-        NavigationRoute.Builder builder = NavigationRoute.builder(MainActivity.this)
-                .accessToken(getString(R.string.access_token))
-                .origin(currentLocation)
-                .destination(destination)
-                .profile(getRouteProfileFromSharedPreferences())
-                .alternatives(true);
-        setFieldsFromSharedPreferences(builder);
-        builder.build()
-                .getRoute(new SimplifiedCallback() {
-                    @Override
-                    public void onResponse(Call<DirectionsResponse> call, Response<DirectionsResponse> response) {
-                        if (validRouteResponse(response)) {
-                            hideLoading();
-                            route = response.body().routes().get(0);
-                            if (route.distance() > 25d) {
-                                launchRouteBtn.setEnabled(true);
-                                mapRoute.addRoutes(response.body().routes());
-                                boundCameraToRoute();
-                            } else {
-                                Snackbar.make(mapView, R.string.error_select_longer_route, Snackbar.LENGTH_SHORT).show();
-                            }
-                        }
-                    }
-                });
-        loading.setVisibility(View.VISIBLE);
-    }
-
-    private void setFieldsFromSharedPreferences(NavigationRoute.Builder builder) {
-        builder
-                .language(getLanguageFromSharedPreferences())
-                .voiceUnits(getUnitTypeFromSharedPreferences());
-    }
-
-    private String getUnitTypeFromSharedPreferences() {
-        SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(MainActivity.this);
-        String defaultUnitType = getString(R.string.default_unit_type);
-        String unitType = sharedPreferences.getString(getString(R.string.unit_type_key), defaultUnitType);
-        if (unitType.equals(defaultUnitType)) {
-            unitType = localeUtils.getUnitTypeForDeviceLocale(MainActivity.this);
-        }
-
-        return unitType;
-    }
-
-    private Locale getLanguageFromSharedPreferences() {
-        SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(MainActivity.this);
-        String defaultLanguage = getString(R.string.default_locale);
-        String language = sharedPreferences.getString(getString(R.string.language_key), defaultLanguage);
-        if (language.equals(defaultLanguage)) {
-            return localeUtils.inferDeviceLocale(MainActivity.this);
-        } else {
-            return new Locale(language);
-        }
-    }
-
-    private String getRouteProfileFromSharedPreferences() {
-        SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(MainActivity.this);
-        return sharedPreferences.getString(
-                getString(R.string.route_profile_key), DirectionsCriteria.PROFILE_DRIVING_TRAFFIC
-        );
-    }
-
-    private void launchNavigationWithRoute() {
-        if (route == null) {
-            Snackbar.make(mapView, R.string.error_route_not_available, Snackbar.LENGTH_SHORT).show();
-            return;
-        }
-        NavigationLauncherOptions.Builder optionsBuilder = NavigationLauncherOptions.builder()
-                .shouldSimulateRoute(true);
-        CameraPosition initialPosition = new CameraPosition.Builder()
-                .target(new LatLng(currentLocation.latitude(), currentLocation.longitude()))
-                .zoom(16)
-                .build();
-        optionsBuilder.initialMapCameraPosition(initialPosition);
-        optionsBuilder.directionsRoute(route);
-        NavigationLauncher.startNavigation(MainActivity.this, optionsBuilder.build());
-    }
-
-    private boolean validRouteResponse(Response<DirectionsResponse> response) {
-        return response.body() != null && !response.body().routes().isEmpty();
-    }
-
-    private void hideLoading() {
-        if (loading.getVisibility() == View.VISIBLE) {
-            loading.setVisibility(View.INVISIBLE);
-        }
-    }
-
-    public void boundCameraToRoute() {
-        if (route != null) {
-            List<Point> routeCoords = LineString.fromPolyline(route.geometry(),
-                    Constants.PRECISION_6).coordinates();
-            List<LatLng> bboxPoints = new ArrayList<>();
-            for (Point point : routeCoords) {
-                bboxPoints.add(new LatLng(point.latitude(), point.longitude()));
-            }
-            if (bboxPoints.size() > 1) {
-                try {
-                    LatLngBounds bounds = new LatLngBounds.Builder().includes(bboxPoints).build();
-// left, top, right, bottom
-                    int topPadding = 50 * 2;
-                    animateCameraBbox(bounds, CAMERA_ANIMATION_DURATION, new int[] {50, topPadding, 50, 100});
-                } catch (InvalidLatLngBoundsException exception) {
-                    Toast.makeText(MainActivity.this, R.string.error_valid_route_not_found, Toast.LENGTH_SHORT).show();
-                }
-            }
-        }
-    }
-
-    private void animateCameraBbox(LatLngBounds bounds, int animationTime, int[] padding) {
-        CameraPosition position = mapboxMap.getCameraForLatLngBounds(bounds, padding);
-        mapboxMap.animateCamera(CameraUpdateFactory.newCameraPosition(position), animationTime);
-    }
-
-    private void animateCamera(LatLng point) {
-        mapboxMap.animateCamera(CameraUpdateFactory.newLatLngZoom(point, 16), CAMERA_ANIMATION_DURATION);
-    }
-
-    private void setCurrentMarkerPosition(LatLng position) {
-        if (position != null) {
-            if (currentMarker == null) {
-                MarkerOptions markerViewOptions = new MarkerOptions()
-                        .position(position);
-                currentMarker = mapboxMap.addMarker(markerViewOptions);
-            } else {
-                currentMarker.setPosition(position);
-            }
-        }
-    }
-
-    @NonNull
-    private LocationEngineRequest buildEngineRequest() {
-        return new LocationEngineRequest.Builder(UPDATE_INTERVAL_IN_MILLISECONDS)
-                .setPriority(LocationEngineRequest.PRIORITY_HIGH_ACCURACY)
-                .setFastestInterval(FASTEST_UPDATE_INTERVAL_IN_MILLISECONDS)
-                .build();
-    }
-
-    private static class NavigationLauncherLocationCallback implements LocationEngineCallback<LocationEngineResult> {
-
-        private final WeakReference<MainActivity> activityWeakReference;
-
-        NavigationLauncherLocationCallback(MainActivity activity) {
-            this.activityWeakReference = new WeakReference<>(activity);
-        }
-
-        @Override
-        public void onSuccess(LocationEngineResult result) {
-
-            MainActivity activity = activityWeakReference.get();
-
-            if (activity != null) {
-                Location location = result.getLastLocation();
-                if (location == null) {
-                    return;
-                }
-                activity.updateCurrentLocation(Point.fromLngLat(location.getLongitude(), location.getLatitude()));
-                activity.onLocationFound(location);
-
-            }
-        }
-        @Override
-        public void onFailure(@NonNull Exception exception) {
-            Timber.e(exception);
-        }
+    public Location getLoc(){
+        return currentLocation;
     }
 }
+

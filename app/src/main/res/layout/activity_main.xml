@@ -1,31 +1,45 @@
 <?xml version="1.0" encoding="utf-8"?>
-<RelativeLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    xmlns:app="http://schemas.android.com/apk/res-auto">
+    xmlns:mapbox="http://schemas.android.com/apk/res-auto"
+    android:background="#ffffff">
+    <android.support.v7.widget.Toolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="50dp"
+        android:background="#117aca"
+        app:contentInsetLeft="10dp"
+        app:contentInsetStart="10dp"
+        app:popupTheme="@style/AppTheme.PopupOverlay"
+        app:title="Veoride"
+        app:titleTextColor="#FFFFFF" />
+
+
 
     <com.mapbox.mapboxsdk.maps.MapView
         android:id="@+id/mapView"
+        android:layout_below="@id/toolbar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_above="@id/launch_route_btn"
-        app:mapbox_uiAttribution="true"/>
-
-    <ProgressBar
-        android:id="@+id/loading"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:indeterminate="true"
-        android:layout_centerInParent="true"
-        android:visibility="visible"/>
+        android:layout_above="@id/startnavigationbutton"
+        mapbox:mapbox_cameraTargetLat="38.9098"
+        mapbox:mapbox_cameraTargetLng="-77.0295"
+        mapbox:mapbox_cameraZoom="15" />
 
     <Button
-        android:id="@+id/launch_route_btn"
-        android:layout_width="wrap_content"
+        android:id="@+id/startnavigationbutton"
+        android:layout_width="match_parent"
         android:layout_height="50dp"
-        android:layout_centerHorizontal="true"
+        android:textColor="#ffffff"
+        android:layout_marginLeft="20dp"
+        android:layout_marginRight="20dp"
+        android:layout_marginBottom="10dp"
+        android:text="Start Navigation"
         android:layout_alignParentBottom="true"
-        android:text="Launch Navigation"/>
+        android:enabled="false"
+        android:background="#263375"/>
 
 </RelativeLayout>
